@@ -2,8 +2,8 @@ use graphviz_rust::dot_generator::*;
 use graphviz_rust::dot_structures::Vertex::N;
 use graphviz_rust::dot_structures::*;
 use std::collections::HashMap;
+use crate::TypedGraph;
 
-type MyGraph = crate::Graph;
 type MyNodeId = crate::NodeId;
 
 pub fn get_stmt_ref(graph: &Graph) -> &Vec<Stmt> {
@@ -22,20 +22,15 @@ pub fn get_id_str(id: &Id) -> &str {
     }
 }
 
-pub fn dot_to_graph(dot_list: &Vec<Stmt>) -> (MyGraph, Vec<Id>) {
-    let mut graph = MyGraph::new();
-    let mut dot_nodes: Vec<Id> = Vec::new();
+pub fn dot_to_graph(dot_list: &Vec<Stmt>) -> TypedGraph<Id> {
+    let mut graph = TypedGraph::new();
     let mut node_id_to_v = HashMap::<String, MyNodeId>::new();
 
-    let mut ensure_node =
-        |id: &Id, graph: &mut MyGraph, mapping: &mut HashMap<String, MyNodeId>| {
+    let ensure_node =
+        |id: &Id, graph: &mut TypedGraph<Id>, mapping: &mut HashMap<String, MyNodeId>| {
             mapping
                 .entry(get_id_str(id).to_string())
-                .or_insert_with(|| {
-                    let v = graph.new_node();
-                    dot_nodes.push(id.clone());
-                    v
-                });
+                .or_insert_with(|| graph.new_node(id.clone()));
         };
 
     for stmt in dot_list {
@@ -64,23 +59,22 @@ pub fn dot_to_graph(dot_list: &Vec<Stmt>) -> (MyGraph, Vec<Id>) {
             _ => {}
         }
     }
-
-    (graph, dot_nodes)
+    graph
 }
 
 pub fn mygraph_to_graphviz(
-    my_graph: &MyGraph,
-    node_mapping: &dyn Fn(MyNodeId) -> Node,
+    my_graph: &TypedGraph<Node>,
     label: &str,
 ) -> Graph {
     let mut graph = graph!(strict di id!(label));
+    let mapping = my_graph.mapping();
     for v in 0..my_graph.size() {
         // Define current node
-        graph.add_stmt(Stmt::Node(node_mapping(v)));
+        graph.add_stmt(Stmt::Node(mapping[v].clone()));
 
         // Add all outgoing edges
         for u in my_graph.next(v) {
-            graph.add_stmt(Stmt::Edge(edge!(node_mapping(v).id => node_mapping(*u).id)))
+            graph.add_stmt(Stmt::Edge(edge!(mapping[v].clone().id => mapping[*u].clone().id)))
         }
     }
     graph
@@ -121,12 +115,13 @@ mod tests {
             "#;
         let graph = parse(graph_str).unwrap();
 
-        let (my_graph, dot_nodes) = dot_to_graph(get_stmt_ref(&graph));
+        let my_graph = dot_to_graph(get_stmt_ref(&graph));
+        let mapping = &my_graph.mapping();
 
-        let a_node = get_node_by_name(&dot_nodes, "a").unwrap();
-        let b_node = get_node_by_name(&dot_nodes, "b").unwrap();
-        let a1_node = get_node_by_name(&dot_nodes, "A1").unwrap();
-        let c_node = get_node_by_name(&dot_nodes, "c").unwrap();
+        let a_node = get_node_by_name(mapping, "a").unwrap();
+        let b_node = get_node_by_name(mapping, "b").unwrap();
+        let a1_node = get_node_by_name(mapping, "A1").unwrap();
+        let c_node = get_node_by_name(mapping, "c").unwrap();
 
         assert_eq!(
             my_graph.next(a_node).iter().collect::<HashSet<&NodeId>>(),

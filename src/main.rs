@@ -35,9 +35,9 @@ fn main() -> io::Result<()> {
         .map(|l| l.trim().to_string())
         .collect::<HashSet<_>>();
 
-    let (graph, node_mapping) = dot_to_graph(get_stmt_ref(&call_graph));
+    let graph = dot_to_graph(get_stmt_ref(&call_graph));
 
-    let tagged_nodes = node_mapping
+    let tagged_nodes = graph.mapping()
         .iter()
         .enumerate()
         .filter_map(|(i, node)| {
@@ -51,12 +51,11 @@ fn main() -> io::Result<()> {
 
     let inv_graph = graph.inv();
     // Here subgraph node v maps to DotId via node_mapping[proj_mapping[v]]
-    let (subgraph, proj_mapping) = inv_graph.projection(&inv_graph.get_reachable(&tagged_nodes));
+    let (subgraph, _) = inv_graph.projection(&inv_graph.get_reachable(&tagged_nodes));
 
     if let Some(save_extracted) = args.save_extracted {
         let dot_g = mygraph_to_graphviz(
-            &subgraph,
-            &|v| node_from_id(&node_mapping[proj_mapping[v]]),
+            &subgraph.map(|id| node_from_id(&id)),
             "Extracted call graph",
         );
         let mut ctx = PrinterContext::default();

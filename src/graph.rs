@@ -2,24 +2,38 @@ use std::collections::{HashMap, HashSet};
 
 pub type NodeId = usize;
 
-pub struct Graph {
+#[derive(Clone)]
+pub struct TypedGraph<T> {
     next: Vec<Vec<NodeId>>,
+    mapping: Vec<T>
 }
 
-impl Default for Graph {
+impl <T> Default for TypedGraph<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Graph {
+impl <T> TypedGraph<T> {
     pub fn new() -> Self {
-        Self { next: vec![] }
+        Self {
+            next: vec![],
+            mapping: vec![],
+        }
     }
 
-    pub fn new_with_size(size: usize) -> Self {
+    pub fn new_with_size(size: usize) -> Self
+    where T: Default {
         Self {
             next: vec![vec![]; size],
+            mapping: (0..size).map(|_| Default::default()).collect(),
+        }
+    }
+
+    pub fn new_with_mapping(mapping: Vec<T>) -> Self {
+        Self {
+            next: vec![vec![]; mapping.len()],
+            mapping,
         }
     }
 
@@ -27,9 +41,10 @@ impl Graph {
         self.next.len()
     }
 
-    pub fn new_node(&mut self) -> NodeId {
+    pub fn new_node(&mut self, value: T) -> NodeId {
         let id = self.next.len();
         self.next.push(vec![]);
+        self.mapping.push(value);
         id
     }
 
@@ -39,6 +54,19 @@ impl Graph {
 
     pub fn next(&self, id: NodeId) -> &Vec<NodeId> {
         &self.next[id]
+    }
+
+    pub fn mapping(&self) -> &Vec<T> {
+        &self.mapping
+    }
+
+    pub fn mapping_mut(&mut self) -> &mut Vec<T> {
+        &mut self.mapping
+    }
+
+    pub fn map<F, R>(self, f: F) -> TypedGraph<R>
+    where F: FnMut(T) -> R {
+        TypedGraph::new_with_mapping(self.mapping.into_iter().map(f).collect())
     }
 
     fn mark_reachable(&self, start: NodeId, used: &mut [bool]) {
@@ -68,8 +96,9 @@ impl Graph {
 
     /// Construct inverse graph
     /// Node numbers are preserved
-    pub fn inv(&self) -> Graph {
-        let mut graph = Graph::new_with_size(self.size());
+    pub fn inv(&self) -> TypedGraph<T>
+    where T: Clone {
+        let mut graph = TypedGraph::new_with_mapping(self.mapping().clone());
         for v in 0..self.size() {
             for &u in &self.next[v] {
                 graph.add_edge(u, v);
@@ -80,12 +109,20 @@ impl Graph {
 
     /// Create new graph with specified nodes only.
     /// Mapping NewNode -> OriginalNode is also provided
-    pub fn projection(&self, nodes: &[NodeId]) -> (Graph, Vec<NodeId>) {
+    pub fn projection(&self, nodes: &[NodeId]) -> (TypedGraph<T>, Vec<NodeId>)
+    where T: Clone {
         let distinct: HashSet<NodeId> = HashSet::from_iter(nodes.iter().cloned());
-        let mut graph = Graph::new_with_size(distinct.len());
 
         let mut mapping = distinct.iter().cloned().collect::<Vec<NodeId>>();
         mapping.sort();
+        let mut graph = TypedGraph::new_with_mapping(
+            mapping
+                .clone()
+                .iter()
+                .map(|&v| self.mapping[v].clone())
+                .collect()
+        );
+
 
         let mut inv_mapping: HashMap<NodeId, NodeId> = HashMap::new();
         for (v, &orig) in mapping.iter().enumerate() {
@@ -105,10 +142,10 @@ impl Graph {
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::Graph;
+    use crate::graph::TypedGraph;
 
-    fn get_sample_graph() -> Graph {
-        let mut graph = Graph::new_with_size(10);
+    fn get_sample_graph() -> TypedGraph<u8> {
+        let mut graph = TypedGraph::new_with_size(10);
         graph.add_edge(0, 1);
         graph.add_edge(1, 3);
         graph.add_edge(2, 0);
