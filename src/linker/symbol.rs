@@ -54,11 +54,24 @@ impl<SymPtr> Object<SymPtr> {
 pub struct FCall<SymPtr> {
     pub callee: SymPtr,
     /// Function arguments. None for non-pointer args
-    pub arguments: Vec<Option<SymPtr>>
+    pub arguments: Vec<Option<SymPtr>>,
+    pub callsite: Option<SymPtr>,
 }
 
 impl<SymPtr> FCall<SymPtr> {
     pub fn new(callee: SymPtr, arguments: Vec<Option<SymPtr>>) -> Self {
-        Self { callee, arguments }
+        Self { callee, arguments, callsite: None }
+    }
+    
+    pub fn new_with_callsite(
+        callee: SymPtr, 
+        arguments: Vec<Option<SymPtr>>, 
+        callsite: SymPtr
+    ) -> Self {
+        Self { 
+            callee,
+            arguments,
+            callsite: Some(callsite)
+        }
     }
 }

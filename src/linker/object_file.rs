@@ -127,6 +127,9 @@ impl ObjectFile {
         for arg in fcall.arguments.iter_mut().flatten() {
             *arg = self.update_external_ptr(arg, src);
         }
+        if let Some(callsite) = &mut fcall.callsite {
+            *callsite = self.update_external_ptr(callsite, src);
+        }
     }
 
     /// Link this object file with the other one.
@@ -242,9 +245,10 @@ mod tests {
         );
         assert_eq!(
             obj1.add_fcall(
-                FCall::new(
+                FCall::new_with_callsite(
                     P(0),
-                    vec![None, Some(O(0)), Some(F(3))]
+                    vec![None, Some(O(0)), Some(F(3))],
+                    F(1)
                 )
             ),
             C(1)
@@ -287,9 +291,10 @@ mod tests {
         );
         assert_eq!(
             obj2.add_fcall(
-                FCall::new(
+                FCall::new_with_callsite(
                     P(0),
-                    vec![None, Some(P(1)), None]
+                    vec![None, Some(P(1)), None],
+                    F(3)
                 )
             ),
             C(0)
@@ -361,16 +366,18 @@ mod tests {
         );
         assert_eq!(
             obj1.calls[1],
-            FCall::new(
+            FCall::new_with_callsite(
                 P(0),
-                vec![None, Some(O(0)), Some(F(3))]
+                vec![None, Some(O(0)), Some(F(3))],
+                F(1)
             )
         );
         assert_eq!(
             obj1.calls[2],
-            FCall::new(
+            FCall::new_with_callsite(
                 P(2),
-                vec![None, Some(P(3)), None]
+                vec![None, Some(P(3)), None],
+                F(3)
             )
         );
         assert_eq!(
