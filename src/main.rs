@@ -1,11 +1,12 @@
 use clap::Parser;
 use graphviz_rust::parse;
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
-use inv_call_extract::{dot_to_graph, get_id_str, get_stmt_ref, mygraph_to_graphviz, node_from_id};
+use inv_call_extract::{get_id_str, TypedGraph};
 use std::collections::HashSet;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::{fs, io};
+use graphviz_rust::dot_structures::Graph;
 
 /// Program that builds inverse call graph with required functions only.
 /// It can be used for creating new .dot graph, listing all ancestors
@@ -35,7 +36,7 @@ fn main() -> io::Result<()> {
         .map(|l| l.trim().to_string())
         .collect::<HashSet<_>>();
 
-    let graph = dot_to_graph(get_stmt_ref(&call_graph));
+    let graph = TypedGraph::from(call_graph);
 
     let tagged_nodes = graph.mapping()
         .iter()
@@ -54,10 +55,7 @@ fn main() -> io::Result<()> {
     let (subgraph, _) = inv_graph.projection(&inv_graph.get_reachable(&tagged_nodes));
 
     if let Some(save_extracted) = args.save_extracted {
-        let dot_g = mygraph_to_graphviz(
-            &subgraph.map(|id| node_from_id(&id)),
-            "Extracted call graph",
-        );
+        let dot_g = Graph::from(subgraph);
         let mut ctx = PrinterContext::default();
         fs::write(save_extracted, dot_g.print(&mut ctx))?;
     }

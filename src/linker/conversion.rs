@@ -1,5 +1,5 @@
-use graphviz_rust::dot_structures::{Graph, Id};
-use log::{info, warn};
+use graphviz_rust::dot_structures::Id;
+use log::warn;
 use crate::linker::object_file::ObjectFile;
 use crate::linker::symbol::{FCall, Function};
 use crate::{get_id_str, TypedGraph};
