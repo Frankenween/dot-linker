@@ -66,7 +66,10 @@ impl <T> TypedGraph<T> {
 
     pub fn map<F, R>(self, f: F) -> TypedGraph<R>
     where F: FnMut(T) -> R {
-        TypedGraph::new_with_mapping(self.mapping.into_iter().map(f).collect())
+        TypedGraph {
+            next: self.next,
+            mapping: self.mapping.into_iter().map(f).collect()
+        }
     }
 
     fn mark_reachable(&self, start: NodeId, used: &mut [bool]) {
