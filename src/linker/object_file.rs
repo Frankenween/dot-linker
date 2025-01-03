@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use log::{debug};
+use log::debug;
 use super::symbol::{FCall, Function, Object, PointsTo};
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
@@ -16,11 +16,11 @@ pub enum SymPtr {
 
 #[derive(Default)]
 pub struct ObjectFile {
-    functions: Vec<Function>,
-    func_mapping: HashMap<String, usize>,
-    objects: Vec<Object<SymPtr>>,
-    points_to: Vec<PointsTo<SymPtr>>,
-    calls: Vec<FCall<SymPtr>>
+    pub(super) functions: Vec<Function>,
+    pub(super) func_mapping: HashMap<String, usize>,
+    pub(super) objects: Vec<Object<SymPtr>>,
+    pub(super) points_to: Vec<PointsTo<SymPtr>>,
+    pub(super) calls: Vec<FCall<SymPtr>>
 }
 
 impl ObjectFile {
@@ -93,6 +93,23 @@ impl ObjectFile {
             SymPtr::F(_) => false,
             SymPtr::P(_) => true,
             _ => panic!("Callee is not a function or pointer set")
+        }
+    }
+    
+    pub fn get_referenced_functions(&self, id: SymPtr) -> Vec<usize> {
+        match id {
+            SymPtr::F(idx) => vec![idx],
+            SymPtr::P(idx) => {
+                self.points_to[idx]
+                    .points_to
+                    .iter()
+                    .filter_map(|ptr| match ptr {
+                        SymPtr::F(fid) => Some(*fid),
+                        _ => None
+                    })
+                    .collect()
+            },
+            _ => panic!("Only function and points-to set can reference functions, not {id:?}")
         }
     }
     
