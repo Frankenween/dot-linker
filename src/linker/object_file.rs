@@ -181,6 +181,11 @@ impl ObjectFile {
         self.points_to.append(&mut other.points_to);
         self.calls.append(&mut other.calls);
     }
+    
+    pub fn link_consuming(mut o1: Self, o2: Self) -> Self {
+        o1.link(o2);
+        o1
+    }
 }
 
 #[cfg(test)]

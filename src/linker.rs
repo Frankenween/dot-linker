@@ -1,3 +1,3 @@
 mod symbol;
-mod object_file;
-mod conversion;
+pub mod object_file;
+pub mod conversion;
