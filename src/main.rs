@@ -4,7 +4,8 @@ use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::{fs, io};
-use graphviz_rust::dot_structures::Graph;
+use std::collections::HashSet;
+use graphviz_rust::dot_structures::{Graph, Id};
 use log::warn;
 use inv_call_extract::{get_id_str, TypedGraph};
 use crate::linker::object_file::ObjectFile;
@@ -20,8 +21,15 @@ struct Args {
     /// Paths to .dot files with call graphs
     #[clap(short, long)]
     dot: Vec<PathBuf>,
+    
+    #[clap(long)]
+    no_inv: bool,
 
-    /// Path to file with function names to be extracted
+    /// Path to file with function names to be extracted.
+    /// With --no-inv flag program will construct call graph with
+    /// functions reachable from listed in file. 
+    /// Otherwise, graph will contain functions, from which any listed one
+    /// can be reached(inverse call graph).
     #[clap(short = 'e', long = "extract-list")]
     extract_functions: Option<PathBuf>,
 
@@ -33,6 +41,29 @@ struct Args {
     /// Link all files in one object file
     #[clap(short, long)]
     link: bool
+}
+
+fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, TypedGraph<Id>)]) -> io::Result<()> {
+    let tags = read_to_string(extract_list)?
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect::<HashSet<_>>();
+    for (_, graph) in objects.iter_mut() {
+        let tagged_nodes = graph.mapping()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| {
+                if tags.contains(get_id_str(node)) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let reachable = graph.get_reachable(&tagged_nodes);
+        *graph = graph.projection(&reachable).0
+    }
+    Ok(())
 }
 
 fn main() -> io::Result<()> {
@@ -60,9 +91,29 @@ fn main() -> io::Result<()> {
             .unwrap();
         objects = vec![(args.save_extracted.clone(), linked)];
     }
+    
+    // Convert ObjectFile to TypedGraph
+    let mut typed_graphs = objects.into_iter()
+        .map(|p| (p.0, TypedGraph::from(p.1)))
+        .collect::<Vec<_>>();
+    
+    // Invert graph for reachable purposes
+    if !args.no_inv {
+        typed_graphs.iter_mut().for_each(|(_, graph)| *graph = graph.inv())
+    }
+    
+    // Extract subgraph
+    if let Some(extracted) = args.extract_functions {
+        mark_reachable_functions(extracted, &mut typed_graphs)?;
+    }
+    
+    // Invert graph back
+    if !args.no_inv {
+        typed_graphs.iter_mut().for_each(|(_, graph)| *graph = graph.inv())
+    }
 
-    for (save_to, obj_file) in objects {
-        let dot_graph = Graph::from(TypedGraph::from(obj_file));
+    for (save_to, gr) in typed_graphs {
+        let dot_graph = Graph::from(gr);
         let mut ctx = PrinterContext::default();
         let _ = fs::write(save_to, dot_graph.print(&mut ctx)).inspect_err(|err| {
             warn!("Failed to write .dot file: {err}");
