@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub type NodeId = usize;
 
@@ -140,6 +140,53 @@ impl <T> TypedGraph<T> {
             }
         }
         (graph, mapping)
+    }
+    
+    /// Find the shortest path from -> to or return None
+    pub fn get_shortest_path(&self, from: NodeId, to: NodeId) -> Option<Vec<NodeId>> {
+        let mut used = HashSet::new();
+        let mut prev = vec![-1; self.size()];
+        let mut queue = VecDeque::new();
+
+        queue.push_back(from);
+        used.insert(from);
+        while let Some(v) = queue.pop_front() {
+            if v == to {
+                break
+            }
+            for &u in &self.next[v] {
+                if used.insert(u) {
+                    queue.push_back(u);
+                    prev[u] = v as isize;
+                }
+            }
+        }
+        if prev[to] == -1 {
+            return None;
+        }
+        let mut answer = vec![];
+        let mut v = to as isize;
+        while v != -1 {
+            answer.push(v as usize);
+            v = prev[v as usize];
+        }
+        Some(answer)
+    }
+    
+    pub fn find(&self, predicate: &dyn Fn(&T) -> bool) -> Option<NodeId> {
+        self.mapping
+            .iter()
+            .enumerate()
+            .find_map(|(id, v)| if predicate(v) {
+                Some(id)
+            } else {
+                None
+            })
+    }
+    
+    pub fn find_t(&self, value: &T) -> Option<NodeId>
+    where T: Eq {
+        self.find(&|v| v == value)
     }
 }
 
