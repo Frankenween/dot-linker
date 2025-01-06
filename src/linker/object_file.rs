@@ -59,22 +59,22 @@ impl ObjectFile {
         SymPtr::C(idx)
     }
     
-    fn get_fun_id(&self, name: &str) -> Option<usize> {
+    pub fn get_fun_id(&self, name: &str) -> Option<usize> {
         self.func_mapping.get(name).copied()
     }
 
-    fn get_fun_by_name(&self, name: &str) -> Option<&Function> {
+    pub fn get_fun_by_name(&self, name: &str) -> Option<&Function> {
         Some(&self.functions[*self.func_mapping.get(name)?])
     }
     
-    fn get_fun_by_id(&self, id: &SymPtr) -> &Function {
+    pub fn get_fun_by_id(&self, id: &SymPtr) -> &Function {
         match id {
             SymPtr::F(i) => &self.functions[*i],
             _ => panic!("not an function id")
         }
     }
 
-    fn get_mut_fun_by_name(&mut self, name: &str) -> Option<&mut Function> {
+    pub fn get_mut_fun_by_name(&mut self, name: &str) -> Option<&mut Function> {
         Some(&mut self.functions[*self.func_mapping.get(name)?])
     }
 

@@ -9,6 +9,7 @@ use graphviz_rust::dot_structures::{Graph, Id};
 use log::warn;
 use inv_call_extract::{get_id_str, TypedGraph};
 use crate::linker::object_file::ObjectFile;
+use crate::linker::pass::{LinkerPass, TerminateNodePass};
 
 pub mod linker;
 
@@ -40,7 +41,11 @@ struct Args {
     
     /// Link all files in one object file
     #[clap(short, long)]
-    link: bool
+    link: bool,
+    
+    /// List of functions to be terminated, so there will be no calls from them
+    #[clap(long)]
+    pass_term_nodes: Option<PathBuf>,
 }
 
 fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, TypedGraph<Id>)]) -> io::Result<()> {
@@ -62,6 +67,19 @@ fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, Type
             .collect::<Vec<_>>();
         let reachable = graph.get_reachable(&tagged_nodes);
         *graph = graph.projection(&reachable).0
+    }
+    Ok(())
+}
+
+fn run_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::Result<()> {
+    let mut passes: Vec<Box<dyn LinkerPass>> = vec![];
+    if let Some(term_nodes) = &args.pass_term_nodes {
+        let data = read_to_string(term_nodes)?;
+        passes.push(Box::new(TerminateNodePass::new_from_str(&data)));
+    }
+    for pass in passes {
+        objects.iter_mut()
+            .for_each(|(_, graph)| pass.run_pass(graph))
     }
     Ok(())
 }
@@ -91,6 +109,8 @@ fn main() -> io::Result<()> {
             .unwrap();
         objects = vec![(args.save_extracted.clone(), linked)];
     }
+    
+    run_passes(&args, &mut objects)?;
     
     // Convert ObjectFile to TypedGraph
     let mut typed_graphs = objects.into_iter()
