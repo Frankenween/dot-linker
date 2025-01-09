@@ -1,13 +1,13 @@
 use clap::Parser;
 use graphviz_rust::parse;
-use graphviz_rust::printer::{DotPrinter, PrinterContext};
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::dot::{Config, Dot};
+use petgraph::visit::Dfs;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::{fs, io};
 use std::collections::HashSet;
-use graphviz_rust::dot_structures::{Graph, Id};
 use log::warn;
-use inv_call_extract::{get_id_str, TypedGraph};
 use crate::linker::object_file::ObjectFile;
 use crate::linker::pass::{LinkerPass, TerminateNodePass};
 
@@ -48,25 +48,40 @@ struct Args {
     pass_term_nodes: Option<PathBuf>,
 }
 
-fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, TypedGraph<Id>)]) -> io::Result<()> {
+fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGraph<String, ()>)]) -> io::Result<()> {
     let tags = read_to_string(extract_list)?
         .lines()
         .map(|l| l.trim().to_string())
         .collect::<HashSet<_>>();
     for (_, graph) in objects.iter_mut() {
-        let tagged_nodes = graph.mapping()
-            .iter()
+        let tagged_nodes = graph.node_weights()
             .enumerate()
             .filter_map(|(i, node)| {
-                if tags.contains(get_id_str(node)) {
+                if tags.contains(node) {
                     Some(i)
                 } else {
                     None
                 }
             })
             .collect::<Vec<_>>();
-        let reachable = graph.get_reachable(&tagged_nodes);
-        *graph = graph.projection(&reachable).0
+        let mut dfs_visitor = Dfs::empty(&*graph);
+        let mut visited = HashSet::new();
+        for v in tagged_nodes {
+            dfs_visitor.move_to(NodeIndex::from(v as u32));
+            while let Some(reached) = dfs_visitor.next(&*graph) {
+                visited.insert(reached);
+            }
+        }
+        *graph = graph.filter_map(
+            |idx, value| {
+                if visited.contains(&idx) { 
+                    Some(value.clone()) 
+                } else { 
+                    None 
+                }
+            },
+            |_, _| Some(())
+        );
     }
     Ok(())
 }
@@ -97,7 +112,7 @@ fn main() -> io::Result<()> {
         output_path.set_extension("out.dot");
         objects.push((
             output_path, 
-            ObjectFile::from(TypedGraph::from(graph))
+            ObjectFile::from(graph)
         ));
     }
     
@@ -114,12 +129,12 @@ fn main() -> io::Result<()> {
     
     // Convert ObjectFile to TypedGraph
     let mut typed_graphs = objects.into_iter()
-        .map(|p| (p.0, TypedGraph::from(p.1)))
+        .map(|p| (p.0, DiGraph::from(p.1)))
         .collect::<Vec<_>>();
     
     // Invert graph for reachable purposes
     if !args.no_inv {
-        typed_graphs.iter_mut().for_each(|(_, graph)| *graph = graph.inv())
+        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse())
     }
     
     // Extract subgraph
@@ -129,13 +144,12 @@ fn main() -> io::Result<()> {
     
     // Invert graph back
     if !args.no_inv {
-        typed_graphs.iter_mut().for_each(|(_, graph)| *graph = graph.inv())
+        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse())
     }
 
     for (save_to, gr) in typed_graphs {
-        let dot_graph = Graph::from(gr);
-        let mut ctx = PrinterContext::default();
-        let _ = fs::write(save_to, dot_graph.print(&mut ctx)).inspect_err(|err| {
+        let dot_graph = Dot::with_config(&gr, &[Config::EdgeNoLabel]);
+        let _ = fs::write(save_to, format!("{:?}", dot_graph)).inspect_err(|err| {
             warn!("Failed to write .dot file: {err}");
         });
     }
