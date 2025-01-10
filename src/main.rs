@@ -3,10 +3,11 @@ use graphviz_rust::parse;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::dot::{Config, Dot};
 use petgraph::visit::Dfs;
-use std::fs::read_to_string;
+use std::fs::{read_to_string, File};
 use std::path::PathBuf;
 use std::{fs, io};
 use std::collections::HashSet;
+use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use log::warn;
 use petgraph::Graph;
@@ -22,9 +23,10 @@ pub mod linker;
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    /// Paths to .dot files with call graphs
+    /// File with list of dot files to process.
+    /// If not provided, paths to dot files are read from stdin
     #[clap(short, long)]
-    dot: Vec<PathBuf>,
+    dots: Option<PathBuf>,
     
     #[clap(long)]
     no_inv: bool,
@@ -122,23 +124,43 @@ fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) -
     Ok(())
 }
 
+fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, ObjectFile)>> {
+    let mut objects: Vec<(PathBuf, ObjectFile)> = vec![];
+    let files = match &args.dots {
+        None => {
+            BufReader::new(io::stdin())
+                .lines()
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
+        },
+        Some(dots) => {
+            BufReader::new(File::open(dots)?)
+                .lines()
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
+        }
+    };
+    for dot in &files {
+        let path = PathBuf::from(dot);
+        let Ok(graph) = parse(&read_to_string(path.clone())?) else {
+            panic!("Failed to parse .dot graph: {dot:?}");
+        };
+        let mut output_path = path;
+        output_path.set_extension("out.dot");
+        objects.push((
+            output_path,
+            ObjectFile::from(graph)
+        ));
+    }
+    Ok(objects)
+
+}
+
 fn main() -> io::Result<()> {
     colog::init();
     let mut args = Args::parse();
     // Keep objects with names to save them later if needed.
-    let mut objects: Vec<(PathBuf, ObjectFile)> = vec![];
-    for dot in &args.dot {
-        let Ok(graph) = parse(&read_to_string(dot)?) else {
-            panic!("Failed to parse .dot graph: {dot:?}");
-        };
-        let mut output_path = dot.clone();
-        output_path.set_extension("out.dot");
-        objects.push((
-            output_path, 
-            ObjectFile::from(graph)
-        ));
-    }
-    
+    let mut objects: Vec<(PathBuf, ObjectFile)> = read_dot_graphs(&args)?;
     // Link if needed
     if args.link {
         let linked = objects.into_iter()
