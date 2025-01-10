@@ -7,9 +7,12 @@ use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::{fs, io};
 use std::collections::HashSet;
+use std::mem::swap;
 use log::warn;
+use petgraph::Graph;
+use crate::linker::pass::CutWidthPass;
 use crate::linker::object_file::ObjectFile;
-use crate::linker::pass::{LinkerPass, TerminateNodePass};
+use crate::linker::pass::{GraphPass, LinkerPass, TerminateNodePass};
 
 pub mod linker;
 
@@ -46,6 +49,16 @@ struct Args {
     /// List of functions to be terminated, so there will be no calls from them
     #[clap(long)]
     pass_term_nodes: Option<PathBuf>,
+    
+    /// Limit number of calls to the function in original graph
+    /// If function is called more than this number, it is discarded
+    #[clap(long)]
+    pass_max_incoming: Option<usize>,
+
+    /// Limit number of calls from the function in original graph
+    /// If function calls more than this number of other functions, it is discarded
+    #[clap(long)]
+    pass_max_outgoing: Option<usize>
 }
 
 fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGraph<String, ()>)]) -> io::Result<()> {
@@ -86,7 +99,7 @@ fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGr
     Ok(())
 }
 
-fn run_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::Result<()> {
+fn run_linker_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::Result<()> {
     let mut passes: Vec<Box<dyn LinkerPass>> = vec![];
     if let Some(term_nodes) = &args.pass_term_nodes {
         let data = read_to_string(term_nodes)?;
@@ -99,9 +112,19 @@ fn run_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::Result<
     Ok(())
 }
 
+fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) -> io::Result<()> {
+    let mut passes: Vec<Box<dyn GraphPass>> = vec![];
+    passes.push(Box::new(CutWidthPass::new(args.pass_max_incoming, args.pass_max_outgoing)));
+    for pass in passes {
+        objects.iter_mut()
+            .for_each(|(_, graph)| pass.run_pass(graph))
+    }
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     colog::init();
-    let args = Args::parse();
+    let mut args = Args::parse();
     // Keep objects with names to save them later if needed.
     let mut objects: Vec<(PathBuf, ObjectFile)> = vec![];
     for dot in &args.dot {
@@ -125,7 +148,7 @@ fn main() -> io::Result<()> {
         objects = vec![(args.save_extracted.clone(), linked)];
     }
     
-    run_passes(&args, &mut objects)?;
+    run_linker_passes(&args, &mut objects)?;
     
     // Convert ObjectFile to TypedGraph
     let mut typed_graphs = objects.into_iter()
@@ -134,14 +157,24 @@ fn main() -> io::Result<()> {
     
     // Invert graph for reachable purposes
     if !args.no_inv {
-        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse())
+        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse());
+        // In reversed graph incoming edges become outgoing and vice versa
+        swap(&mut args.pass_max_incoming, &mut args.pass_max_outgoing)
     }
     
     // Extract subgraph
-    if let Some(extracted) = args.extract_functions {
-        mark_reachable_functions(extracted, &mut typed_graphs)?;
+    if let Some(extracted) = &args.extract_functions {
+        mark_reachable_functions(extracted.clone(), &mut typed_graphs)?;
     }
+
+    // Run deg pass on extracted subgraph
+    run_graph_passes(&args, &mut typed_graphs)?;
     
+    // After graph passes some nodes may become unreachable. Abandon them
+    if let Some(extracted) = &args.extract_functions {
+        mark_reachable_functions(extracted.clone(), &mut typed_graphs)?;
+    }
+
     // Invert graph back
     if !args.no_inv {
         typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse())

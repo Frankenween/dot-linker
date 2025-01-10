@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use log::debug;
+use petgraph::Graph;
+use petgraph::prelude::EdgeRef;
 use crate::linker::object_file::ObjectFile;
 
 pub trait LinkerPass {
@@ -7,6 +9,10 @@ pub trait LinkerPass {
     /// NOTE: All FCall pointers are invalidated, pointers to functions, 
     /// points-to sets and globals are guaranteed to be valid, but content may change.
     fn run_pass(&self, obj: &mut ObjectFile);
+}
+
+pub trait GraphPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>);
 }
 
 /// Make all listed functions terminal, after this pass there will be no calls from them.
@@ -39,5 +45,42 @@ impl LinkerPass for TerminateNodePass {
                 obj.calls.swap_remove(i);
             }
         }
+    }
+}
+
+pub struct CutWidthPass {
+    max_incoming: usize,
+    max_outgoing: usize,
+}
+
+impl CutWidthPass {
+    pub fn new(max_incoming: Option<usize>, max_outgoing: Option<usize>) -> Self {
+        Self {
+            max_incoming: max_incoming.unwrap_or(usize::MAX),
+            max_outgoing: max_outgoing.unwrap_or(usize::MAX),
+        }
+    }
+}
+
+impl GraphPass for CutWidthPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        // (deg-in; deg-out)
+        let mut deg: Vec<(usize, usize)> = vec![(0, 0); graph.node_count()];
+        for edge in graph.edge_references() {
+            deg[edge.source().index()].1 += 1;
+            deg[edge.target().index()].0 += 1;
+        }
+        let keep_nodes = deg
+            .iter()
+            .enumerate()
+            .filter_map(|(v, &(deg_in, deg_out))|
+                if deg_in <= self.max_incoming && deg_out <= self.max_outgoing {
+                    Some(v)
+                } else {
+                    None
+                }
+            )
+            .collect::<HashSet<_>>();
+        graph.retain_nodes(|_, v| keep_nodes.contains(&v.index()));
     }
 }
