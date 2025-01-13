@@ -1,8 +1,10 @@
 use std::collections::HashSet;
-use log::debug;
+use log::{debug, info, error};
 use petgraph::Graph;
 use petgraph::prelude::EdgeRef;
-use crate::linker::object_file::ObjectFile;
+use regex::Regex;
+use crate::linker::object_file::{ObjectFile, SymPtr};
+use crate::linker::symbol::FCall;
 
 pub trait LinkerPass {
     /// Run pass and modify object file
@@ -45,6 +47,145 @@ impl LinkerPass for TerminateNodePass {
                 obj.calls.swap_remove(i);
             }
         }
+    }
+}
+
+pub enum RegexMatchAction<T> {
+    AddIncoming(Vec<T>),
+    AddOutgoing(Vec<T>),
+}
+
+impl RegexMatchAction<String> {
+    fn to_ptr_list(&self, obj: &ObjectFile) -> RegexMatchAction<usize> {
+        match &self {
+            RegexMatchAction::AddIncoming(l) => RegexMatchAction::AddIncoming(
+                l.iter()
+                .filter_map(|f| obj.get_fun_id(f))
+                .collect()
+            ),
+            RegexMatchAction::AddOutgoing(l) => RegexMatchAction::AddIncoming(
+                l.iter()
+                    .filter_map(|f| obj.get_fun_id(f))
+                    .collect()
+            ),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct RegexNodePass {
+    rules: Vec<(Regex, RegexMatchAction<String>)>
+}
+
+impl RegexNodePass {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn new_from_lines(data: &str) -> Self {
+        let mut result = Self::new();
+        for line in data.lines() {
+            result.add_rule_from_line(line);
+        }
+        result
+    }
+
+    pub fn add_rule(&mut self, rule: (Regex, RegexMatchAction<String>)) {
+        self.rules.push(rule);
+    }
+    
+    fn split_line(line: &str) -> Option<(&str, &str, bool)> {
+        if let Some((regex, list_part)) = line.split_once("->") {
+            Some((regex, list_part, false))
+        } else if let Some((regex, list_part)) = line.split_once("<-") {
+            Some((regex, list_part, true))
+        } else {
+            None
+        }
+    }
+
+    pub fn add_rule_from_line(&mut self, line: &str) {
+        let Some((regex_part, list_part, incoming)) = Self::split_line(line) else {
+            error!("Rule line does not contain '->' or '<-' separator, discarding it: \"{}\"", line);
+            return;
+        };
+        let regex_str = regex_part.trim();
+        if !regex_str.starts_with("\"") 
+            || !regex_str.ends_with("\"") 
+            || regex_str.len() < 2 {
+            error!("Regex part is not wrapped with quotes, discarding it: \"{}\"", line);
+            return;
+        }
+        let Ok(regex) = Regex::new(&regex_str[1..regex_str.len() - 1]) else {
+            error!("Regex is incorrect, discarding it: \"{}\"", line);
+            return;
+        };
+        let symlist = list_part.split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        if incoming {
+            self.rules.push((
+                regex,
+                RegexMatchAction::AddIncoming(symlist)
+            ));
+        } else {
+            self.rules.push((
+                regex,
+                RegexMatchAction::AddOutgoing(symlist)
+            ));
+        }
+    }
+}
+
+impl LinkerPass for RegexNodePass {
+    fn run_pass(&self, obj: &mut ObjectFile) {
+        let resolved_rules: Vec<(&Regex, RegexMatchAction<usize>)> = self.rules
+            .iter()
+            .map(|(r, action)| (r, action.to_ptr_list(obj)))
+            .collect();
+        let mut total_resolved: usize = 0;
+
+        for (idx, function) in obj.functions.iter().enumerate() {
+            for (re, links) in &resolved_rules {
+                if !re.is_match(function.get_name()) {
+                    continue;
+                }
+                // This function matched regex
+                let this_f_id = vec![idx];
+                let from_funcs: &Vec<usize>;
+                let to_funcs: &Vec<usize>;
+
+                match links {
+                    RegexMatchAction::AddIncoming(l) => {
+                        from_funcs = l;
+                        to_funcs = &this_f_id;
+                    }
+                    RegexMatchAction::AddOutgoing(l) => {
+                        from_funcs = &this_f_id;
+                        to_funcs = l;
+                    }
+                }
+
+                for &src in from_funcs {
+                    for &dst in to_funcs {
+                        total_resolved += 1;
+                        debug!("Adding {} -> {}",
+                                obj.functions[src].get_name(),
+                                obj.functions[dst].get_name(),
+                            );
+                        obj.calls.push(
+                            FCall::new_with_callsite(
+                                SymPtr::F(dst),
+                                vec![],
+                                SymPtr::F(src), // callsite is last!
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        info!("RegexNodePass resolved {} calls", total_resolved);
     }
 }
 

@@ -9,9 +9,9 @@ use std::{fs, io};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::mem::swap;
-use log::warn;
+use log::{warn, LevelFilter};
 use petgraph::Graph;
-use crate::linker::pass::CutWidthPass;
+use crate::linker::pass::{CutWidthPass, RegexNodePass};
 use crate::linker::object_file::ObjectFile;
 use crate::linker::pass::{GraphPass, LinkerPass, TerminateNodePass};
 
@@ -60,7 +60,12 @@ struct Args {
     /// Limit number of calls from the function in original graph
     /// If function calls more than this number of other functions, it is discarded
     #[clap(long)]
-    pass_max_outgoing: Option<usize>
+    pass_max_outgoing: Option<usize>,
+
+    /// Make new calls using regex rules from provided file.
+    /// Each rule is described in format `"regex" (->|<-) name1 name2 ...`
+    #[clap(long)]
+    pass_node_regex: Option<PathBuf>,
 }
 
 fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGraph<String, ()>)]) -> io::Result<()> {
@@ -107,6 +112,11 @@ fn run_linker_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::
         let data = read_to_string(term_nodes)?;
         passes.push(Box::new(TerminateNodePass::new_from_str(&data)));
     }
+    if let Some(regex_file) = &args.pass_node_regex {
+        let data = read_to_string(regex_file)?;
+        passes.push(Box::new(RegexNodePass::new_from_lines(&data)))
+    }
+
     for pass in passes {
         objects.iter_mut()
             .for_each(|(_, graph)| pass.run_pass(graph))
