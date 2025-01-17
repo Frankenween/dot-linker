@@ -24,6 +24,7 @@ pub struct ObjectFile {
 }
 
 impl ObjectFile {
+    #[must_use]
     pub fn new() -> Self {
         ObjectFile::default()
     }
@@ -59,14 +60,17 @@ impl ObjectFile {
         SymPtr::C(idx)
     }
     
+    #[must_use]
     pub fn get_fun_id(&self, name: &str) -> Option<usize> {
         self.func_mapping.get(name).copied()
     }
 
+    #[must_use]
     pub fn get_fun_by_name(&self, name: &str) -> Option<&Function> {
         Some(&self.functions[*self.func_mapping.get(name)?])
     }
     
+    #[must_use]
     pub fn get_fun_by_id(&self, id: &SymPtr) -> &Function {
         match id {
             SymPtr::F(i) => &self.functions[*i],
@@ -84,18 +88,8 @@ impl ObjectFile {
             _ => panic!("not an function id")
         }
     }
-
-    fn is_indirect_call(&self, fid: SymPtr) -> bool {
-        let SymPtr::C(call) = fid else {
-            panic!("Not a call: {fid:?}");
-        };
-        match self.calls[call].callee {
-            SymPtr::F(_) => false,
-            SymPtr::P(_) => true,
-            _ => panic!("Callee is not a function or pointer set")
-        }
-    }
     
+    #[must_use]
     pub fn get_referenced_functions(&self, id: SymPtr) -> Vec<usize> {
         match id {
             SymPtr::F(idx) => vec![idx],
@@ -113,7 +107,7 @@ impl ObjectFile {
         }
     }
     
-    /// Return new SymPtr with changed index
+    /// Return new `SymPtr` with changed index
     /// If it is a function pointer, new index is resolved using old mapping and 
     /// updated current mapping. Otherwise, index is just advanced.
     /// 
@@ -134,7 +128,7 @@ impl ObjectFile {
     }
 
     fn update_points_to(&self, pts: &mut PointsTo<SymPtr>, src: &ObjectFile) {
-        for ptr in pts.points_to.iter_mut() {
+        for ptr in &mut pts.points_to {
             *ptr = self.update_external_ptr(ptr, src);
         }
     }
@@ -157,7 +151,7 @@ impl ObjectFile {
         // Dummy object to save mapping
         let mut mapper = ObjectFile::new();
         
-        for f in other.functions.iter() {
+        for f in &other.functions {
             mapper.add_function(f.clone());
             let (id, existed) = self.add_function(f.clone());
             if existed && f.is_external() != self.get_fun_by_id(&id).is_external() {
@@ -167,13 +161,13 @@ impl ObjectFile {
         }
         // After this point `other` contains inconsistent data!
         // Update objects in-place, then move them together
-        for o in other.objects.iter_mut() {
+        for o in &mut other.objects {
             self.update_object(o, &mapper);
         }
-        for p in other.points_to.iter_mut() {
+        for p in &mut other.points_to {
             self.update_points_to(p, &mapper);
         }
-        for fc in other.calls.iter_mut() {
+        for fc in &mut other.calls {
             self.update_fcall(fc, &mapper);
         }
         // Now all pointers in `other` are valid in self. Move all symbols
@@ -182,6 +176,7 @@ impl ObjectFile {
         self.calls.append(&mut other.calls);
     }
     
+    #[must_use]
     pub fn link_consuming(mut o1: Self, o2: Self) -> Self {
         o1.link(o2);
         o1

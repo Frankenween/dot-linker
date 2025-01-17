@@ -12,18 +12,16 @@ type DotGraph = graphviz_rust::dot_structures::Graph;
 
 fn get_id_str(id: &Id) -> &str {
     match id {
-        Id::Html(s) => s,
+        Id::Html(s) | Id::Plain(s) | Id::Anonymous(s) => s,
         Id::Escaped(s) => &s[1..s.len() - 1], // fix for quoted names
-        Id::Plain(s) => s,
-        Id::Anonymous(s) => s,
     }
 }
 
 impl From<DotGraph> for ObjectFile {
     fn from(value: DotGraph) -> Self {
         let dot_graph = match value {
-            DotGraph::Graph { stmts, .. } => stmts,
-            DotGraph::DiGraph { stmts, .. } => stmts
+            DotGraph::Graph { stmts, .. } 
+            | DotGraph::DiGraph { stmts, .. } => stmts,
         };
         let mut obj_file = ObjectFile::new();
         let mut node_id_to_v = HashMap::<String, SymPtr>::new();

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use log::{debug, info, error};
 use petgraph::Graph;
-use petgraph::graph::DefaultIx;
 use petgraph::prelude::EdgeRef;
 use regex::Regex;
 use crate::linker::object_file::{ObjectFile, SymPtr};
@@ -9,7 +8,7 @@ use crate::linker::symbol::FCall;
 
 pub trait LinkerPass {
     /// Run pass and modify object file
-    /// NOTE: All FCall pointers are invalidated, pointers to functions, 
+    /// NOTE: All `FCall` pointers are invalidated, pointers to functions, 
     /// points-to sets and globals are guaranteed to be valid, but content may change.
     fn run_pass(&self, obj: &mut ObjectFile);
 }
@@ -26,10 +25,11 @@ pub struct TerminateNodePass {
 impl TerminateNodePass {
     pub fn new(iter: &mut dyn Iterator<Item = &str>) -> Self {
         Self {
-            terminate_funcs: HashSet::from_iter(iter.map(String::from))
+            terminate_funcs: iter.map(String::from).collect()
         }
     }
     
+    #[must_use]
     pub fn new_from_str(s: &str) -> Self {
         Self::new(&mut s.split_whitespace())
     }
@@ -79,10 +79,12 @@ pub struct RegexNodePass {
 }
 
 impl RegexNodePass {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
-    
+
+    #[must_use]
     pub fn new_from_lines(data: &str) -> Self {
         let mut result = Self::new();
         for line in data.lines() {
@@ -111,8 +113,8 @@ impl RegexNodePass {
             return;
         };
         let regex_str = regex_part.trim();
-        if !regex_str.starts_with("\"") 
-            || !regex_str.ends_with("\"") 
+        if !regex_str.starts_with('\"') 
+            || !regex_str.ends_with('\"') 
             || regex_str.len() < 2 {
             error!("Regex part is not wrapped with quotes, discarding it: \"{}\"", line);
             return;
@@ -122,7 +124,7 @@ impl RegexNodePass {
             return;
         };
         let symlist = list_part.split_whitespace()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .collect();
 
         if incoming {
@@ -181,7 +183,7 @@ impl LinkerPass for RegexNodePass {
                                 vec![],
                                 SymPtr::F(src), // callsite is last!
                             )
-                        )
+                        );
                     }
                 }
             }
@@ -196,6 +198,7 @@ pub struct CutWidthPass {
 }
 
 impl CutWidthPass {
+    #[must_use]
     pub fn new(max_incoming: Option<usize>, max_outgoing: Option<usize>) -> Self {
         Self {
             max_incoming: max_incoming.unwrap_or(usize::MAX),
@@ -235,7 +238,7 @@ impl GraphPass for UniqueEdgesPass {
         let mut added_nodes: HashSet<(usize, usize)> = HashSet::new();
         *graph = graph.filter_map(
             |_, v| Some(v.clone()),
-            |idx, _| {
+            |idx, ()| {
                 let (src, dst) = graph.edge_endpoints(idx)?;
                 if added_nodes.insert((src.index(), dst.index())) {
                     Some(())
@@ -251,13 +254,15 @@ impl GraphPass for UniqueEdgesPass {
 mod tests {
     use super::*;
     
+
     #[test]
     fn test_unique_edges() {
         let mut graph = Graph::new();
-        let mut v = vec![];
-        v.push(graph.add_node("1".to_string()));
-        v.push(graph.add_node("2".to_string()));
-        v.push(graph.add_node("3".to_string()));
+        let v = [
+            graph.add_node("1".to_string()),
+            graph.add_node("2".to_string()),
+            graph.add_node("3".to_string())
+        ];
         
         // 0 -> (1, 2)
         // 1 -> (0, 2)

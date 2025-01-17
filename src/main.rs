@@ -1,6 +1,6 @@
 use clap::Parser;
 use graphviz_rust::parse;
-use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::graph::{DefaultIx, DiGraph, NodeIndex};
 use petgraph::dot::{Config, Dot};
 use petgraph::visit::Dfs;
 use std::fs::{read_to_string, File};
@@ -9,7 +9,7 @@ use std::{fs, io};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::mem::swap;
-use log::{warn, LevelFilter};
+use log::warn;
 use petgraph::Graph;
 use crate::linker::pass::{CutWidthPass, RegexNodePass, UniqueEdgesPass};
 use crate::linker::object_file::ObjectFile;
@@ -92,7 +92,8 @@ fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGr
         let mut dfs_visitor = Dfs::empty(&*graph);
         let mut visited = HashSet::new();
         for v in tagged_nodes {
-            dfs_visitor.move_to(NodeIndex::from(v as u32));
+            #[allow(clippy::cast_possible_truncation)]
+            dfs_visitor.move_to(NodeIndex::from(v as DefaultIx));
             while let Some(reached) = dfs_visitor.next(&*graph) {
                 visited.insert(reached);
             }
@@ -105,7 +106,7 @@ fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGr
                     None 
                 }
             },
-            |_, _| Some(())
+            |_, ()| Some(())
         );
     }
     Ok(())
@@ -119,29 +120,28 @@ fn run_linker_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::
     }
     if let Some(regex_file) = &args.pass_node_regex {
         let data = read_to_string(regex_file)?;
-        passes.push(Box::new(RegexNodePass::new_from_lines(&data)))
+        passes.push(Box::new(RegexNodePass::new_from_lines(&data)));
     }
 
     for pass in passes {
         objects.iter_mut()
-            .for_each(|(_, graph)| pass.run_pass(graph))
+            .for_each(|(_, graph)| pass.run_pass(graph));
     }
     Ok(())
 }
 
-fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) -> io::Result<()> {
+fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) {
     let mut passes: Vec<Box<dyn GraphPass>> = vec![];
 
     if !args.allow_duplicate_calls {
-        passes.push(Box::new(UniqueEdgesPass::default()))
+        passes.push(Box::new(UniqueEdgesPass::default()));
     }
     passes.push(Box::new(CutWidthPass::new(args.pass_max_incoming, args.pass_max_outgoing)));
 
     for pass in passes {
         objects.iter_mut()
-            .for_each(|(_, graph)| pass.run_pass(graph))
+            .for_each(|(_, graph)| pass.run_pass(graph));
     }
-    Ok(())
 }
 
 fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, ObjectFile)>> {
@@ -150,13 +150,13 @@ fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, ObjectFile)>> {
         None => {
             BufReader::new(io::stdin())
                 .lines()
-                .filter_map(Result::ok)
+                .map_while(Result::ok)
                 .collect::<Vec<_>>()
         },
         Some(dots) => {
             BufReader::new(File::open(dots)?)
                 .lines()
-                .filter_map(Result::ok)
+                .map_while(Result::ok)
                 .collect::<Vec<_>>()
         }
     };
@@ -201,7 +201,7 @@ fn main() -> io::Result<()> {
     if !args.no_inv {
         typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse());
         // In reversed graph incoming edges become outgoing and vice versa
-        swap(&mut args.pass_max_incoming, &mut args.pass_max_outgoing)
+        swap(&mut args.pass_max_incoming, &mut args.pass_max_outgoing);
     }
     
     // Extract subgraph
@@ -210,7 +210,7 @@ fn main() -> io::Result<()> {
     }
 
     // Run deg pass on extracted subgraph
-    run_graph_passes(&args, &mut typed_graphs)?;
+    run_graph_passes(&args, &mut typed_graphs);
     
     // After graph passes some nodes may become unreachable. Abandon them
     if let Some(extracted) = &args.extract_functions {
@@ -219,12 +219,12 @@ fn main() -> io::Result<()> {
 
     // Invert graph back
     if !args.no_inv {
-        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse())
+        typed_graphs.iter_mut().for_each(|(_, graph)| graph.reverse());
     }
 
     for (save_to, gr) in typed_graphs {
         let dot_graph = Dot::with_config(&gr, &[Config::EdgeNoLabel]);
-        let _ = fs::write(save_to, format!("{:?}", dot_graph)).inspect_err(|err| {
+        let _ = fs::write(save_to, format!("{dot_graph:?}")).inspect_err(|err| {
             warn!("Failed to write .dot file: {err}");
         });
     }
