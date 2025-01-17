@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use log::{debug, info, error};
 use petgraph::Graph;
+use petgraph::graph::DefaultIx;
 use petgraph::prelude::EdgeRef;
 use regex::Regex;
 use crate::linker::object_file::{ObjectFile, SymPtr};
@@ -223,5 +224,71 @@ impl GraphPass for CutWidthPass {
             )
             .collect::<HashSet<_>>();
         graph.retain_nodes(|_, v| keep_nodes.contains(&v.index()));
+    }
+}
+
+#[derive(Default)]
+pub struct UniqueEdgesPass {}
+
+impl GraphPass for UniqueEdgesPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        let mut added_nodes: HashSet<(usize, usize)> = HashSet::new();
+        *graph = graph.filter_map(
+            |_, v| Some(v.clone()),
+            |idx, _| {
+                let (src, dst) = graph.edge_endpoints(idx)?;
+                if added_nodes.insert((src.index(), dst.index())) {
+                    Some(())
+                } else {
+                    None
+                }
+            }
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_unique_edges() {
+        let mut graph = Graph::new();
+        let mut v = vec![];
+        v.push(graph.add_node("1".to_string()));
+        v.push(graph.add_node("2".to_string()));
+        v.push(graph.add_node("3".to_string()));
+        
+        // 0 -> (1, 2)
+        // 1 -> (0, 2)
+        // 2 -> (2, 1)
+        let mut adj_matrix = vec![vec![0; 3]; 3];
+        adj_matrix[0][1] = 1;
+        adj_matrix[0][2] = 1;
+        adj_matrix[1][0] = 1;
+        adj_matrix[1][2] = 1;
+        adj_matrix[2][1] = 1;
+        adj_matrix[2][2] = 1;
+        
+        graph.add_edge(v[0], v[2], ());
+        graph.add_edge(v[0], v[2], ());
+        graph.add_edge(v[0], v[1], ());
+        graph.add_edge(v[0], v[2], ());
+        
+        graph.add_edge(v[1], v[0], ());
+        graph.add_edge(v[1], v[2], ());
+        
+        graph.add_edge(v[2], v[2], ());
+        graph.add_edge(v[2], v[1], ());
+        graph.add_edge(v[2], v[2], ());
+        graph.add_edge(v[2], v[1], ());
+        
+        let pass = UniqueEdgesPass::default();
+        pass.run_pass(&mut graph);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_eq!(adj_matrix[i][j], graph.edges_connecting(v[i], v[j]).count());
+            }
+        }
     }
 }

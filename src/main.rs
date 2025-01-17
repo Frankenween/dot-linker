@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use log::{warn, LevelFilter};
 use petgraph::Graph;
-use crate::linker::pass::{CutWidthPass, RegexNodePass};
+use crate::linker::pass::{CutWidthPass, RegexNodePass, UniqueEdgesPass};
 use crate::linker::object_file::ObjectFile;
 use crate::linker::pass::{GraphPass, LinkerPass, TerminateNodePass};
 
@@ -66,6 +66,11 @@ struct Args {
     /// Each rule is described in format `"regex" (->|<-) name1 name2 ...`
     #[clap(long)]
     pass_node_regex: Option<PathBuf>,
+
+    /// Do not remove multiple edges
+    /// This may affect passes that remove nodes based on their degrees
+    #[clap(long)]
+    allow_duplicate_calls: bool,
 }
 
 fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGraph<String, ()>)]) -> io::Result<()> {
@@ -126,7 +131,12 @@ fn run_linker_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::
 
 fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) -> io::Result<()> {
     let mut passes: Vec<Box<dyn GraphPass>> = vec![];
+
+    if !args.allow_duplicate_calls {
+        passes.push(Box::new(UniqueEdgesPass::default()))
+    }
     passes.push(Box::new(CutWidthPass::new(args.pass_max_incoming, args.pass_max_outgoing)));
+
     for pass in passes {
         objects.iter_mut()
             .for_each(|(_, graph)| pass.run_pass(graph))
