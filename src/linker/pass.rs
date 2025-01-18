@@ -8,6 +8,8 @@ use regex::Regex;
 
 pub trait Pass {
     fn run_pass(&self, graph: &mut Graph<String, ()>);
+
+    fn name(&self) -> String;
 }
 
 /// Make all listed functions terminal, after this pass there will be no calls from them.
@@ -40,6 +42,10 @@ impl Pass for TerminateNodePass {
             |_, ()| Some(())
         );
     }
+
+    fn name(&self) -> String {
+        "node terminator".to_string()
+    }
 }
 
 pub enum RegexMatchAction<T>
@@ -51,7 +57,7 @@ where T : Hash + Eq {
 impl RegexMatchAction<String> {
     fn to_idx_list(&self, graph: &Graph<String, ()>) -> RegexMatchAction<NodeIndex> {
         let required_symbols = match &self {
-            RegexMatchAction::AddIncoming(l) 
+            RegexMatchAction::AddIncoming(l)
             | RegexMatchAction::AddOutgoing(l) => l
         };
         let matched = graph
@@ -173,6 +179,10 @@ impl Pass for RegexNodePass {
         }
         info!("RegexNodePass resolved {} calls", total_resolved);
     }
+
+    fn name(&self) -> String {
+        "regex edge generator".to_string()
+    }
 }
 
 pub struct CutWidthPass {
@@ -211,6 +221,14 @@ impl Pass for CutWidthPass {
             .collect::<HashSet<_>>();
         graph.retain_nodes(|_, v| keep_nodes.contains(&v.index()));
     }
+
+    fn name(&self) -> String {
+        format!(
+            "degree filtering(incoming < {}, outgoing < {})",
+            self.max_incoming + 1,
+            self.max_outgoing + 1
+        )
+    }
 }
 
 #[derive(Default)]
@@ -231,12 +249,15 @@ impl Pass for UniqueEdgesPass {
             }
         );
     }
+
+    fn name(&self) -> String {
+        "decouple edges".to_string()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_unique_edges() {

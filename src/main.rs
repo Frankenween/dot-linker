@@ -9,12 +9,12 @@ use std::{fs, io};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::mem::swap;
-use log::warn;
+use log::{info, warn};
 use petgraph::Graph;
 use crate::linker::conversion::graphviz_to_graph;
 use crate::linker::graph_link;
-use crate::linker::pass::{CutWidthPass, RegexNodePass, UniqueEdgesPass};
-use crate::linker::pass::{Pass, TerminateNodePass};
+use crate::linker::pass::{CutWidthPass, UniqueEdgesPass};
+use crate::linker::pass::Pass;
 
 pub mod linker;
 
@@ -122,6 +122,7 @@ fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) {
     passes.push(Box::new(CutWidthPass::new(args.pass_max_incoming, args.pass_max_outgoing)));
 
     for pass in passes {
+        info!("Running pass {}", pass.name());
         objects.iter_mut()
             .for_each(|(_, graph)| pass.run_pass(graph));
     }
