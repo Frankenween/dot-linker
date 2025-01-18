@@ -11,9 +11,10 @@ use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use log::warn;
 use petgraph::Graph;
+use crate::linker::conversion::graphviz_to_graph;
+use crate::linker::graph_link;
 use crate::linker::pass::{CutWidthPass, RegexNodePass, UniqueEdgesPass};
-use crate::linker::object_file::ObjectFile;
-use crate::linker::pass::{GraphPass, LinkerPass, TerminateNodePass};
+use crate::linker::pass::{Pass, TerminateNodePass};
 
 pub mod linker;
 
@@ -112,26 +113,8 @@ fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGr
     Ok(())
 }
 
-fn run_linker_passes(args: &Args, objects: &mut [(PathBuf, ObjectFile)]) -> io::Result<()> {
-    let mut passes: Vec<Box<dyn LinkerPass>> = vec![];
-    if let Some(term_nodes) = &args.pass_term_nodes {
-        let data = read_to_string(term_nodes)?;
-        passes.push(Box::new(TerminateNodePass::new_from_str(&data)));
-    }
-    if let Some(regex_file) = &args.pass_node_regex {
-        let data = read_to_string(regex_file)?;
-        passes.push(Box::new(RegexNodePass::new_from_lines(&data)));
-    }
-
-    for pass in passes {
-        objects.iter_mut()
-            .for_each(|(_, graph)| pass.run_pass(graph));
-    }
-    Ok(())
-}
-
 fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) {
-    let mut passes: Vec<Box<dyn GraphPass>> = vec![];
+    let mut passes: Vec<Box<dyn Pass>> = vec![];
 
     if !args.allow_duplicate_calls {
         passes.push(Box::new(UniqueEdgesPass::default()));
@@ -144,8 +127,8 @@ fn run_graph_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) {
     }
 }
 
-fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, ObjectFile)>> {
-    let mut objects: Vec<(PathBuf, ObjectFile)> = vec![];
+fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, Graph<String, ()>)>> {
+    let mut objects: Vec<(PathBuf, Graph<String, ()>)> = vec![];
     let files = match &args.dots {
         None => {
             BufReader::new(io::stdin())
@@ -169,7 +152,7 @@ fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, ObjectFile)>> {
         output_path.set_extension("out.dot");
         objects.push((
             output_path,
-            ObjectFile::from(graph)
+            graphviz_to_graph(&graph)
         ));
     }
     Ok(objects)
@@ -180,17 +163,15 @@ fn main() -> io::Result<()> {
     colog::init();
     let mut args = Args::parse();
     // Keep objects with names to save them later if needed.
-    let mut objects: Vec<(PathBuf, ObjectFile)> = read_dot_graphs(&args)?;
+    let mut objects = read_dot_graphs(&args)?;
     // Link if needed
     if args.link {
         let linked = objects.into_iter()
             .map(|p| p.1)
-            .reduce(ObjectFile::link_consuming)
+            .reduce(graph_link::link_graphs)
             .unwrap();
         objects = vec![(args.save_extracted.clone(), linked)];
     }
-    
-    run_linker_passes(&args, &mut objects)?;
     
     // Convert ObjectFile to TypedGraph
     let mut typed_graphs = objects.into_iter()

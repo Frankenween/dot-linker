@@ -1,19 +1,12 @@
 use std::collections::HashSet;
+use std::hash::Hash;
 use log::{debug, info, error};
 use petgraph::Graph;
+use petgraph::graph::NodeIndex;
 use petgraph::prelude::EdgeRef;
 use regex::Regex;
-use crate::linker::object_file::{ObjectFile, SymPtr};
-use crate::linker::symbol::FCall;
 
-pub trait LinkerPass {
-    /// Run pass and modify object file
-    /// NOTE: All `FCall` pointers are invalidated, pointers to functions, 
-    /// points-to sets and globals are guaranteed to be valid, but content may change.
-    fn run_pass(&self, obj: &mut ObjectFile);
-}
-
-pub trait GraphPass {
+pub trait Pass {
     fn run_pass(&self, graph: &mut Graph<String, ()>);
 }
 
@@ -35,40 +28,39 @@ impl TerminateNodePass {
     }
 }
 
-impl LinkerPass for TerminateNodePass {
-    fn run_pass(&self, obj: &mut ObjectFile) {
-        for i in (0..obj.calls.len()).rev() {
-            let Some(callsite_id) = &obj.calls[i].callsite else {
-                continue;
-            };
-            let callsite = obj.get_fun_by_id(callsite_id);
-            if self.terminate_funcs.contains(callsite.get_name()) {
-                debug!("Removing {} -> * call", callsite.get_name());
-                // We processed the calls after us so it's safe to swap-remove it
-                obj.calls.swap_remove(i);
-            }
-        }
+impl Pass for TerminateNodePass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        *graph = graph.filter_map(
+            |_, name| if self.terminate_funcs.contains(name) {
+                Some(name.clone())
+            } else {
+                debug!("Terminating node {name}");
+                None
+            },
+            |_, ()| Some(())
+        );
     }
 }
 
-pub enum RegexMatchAction<T> {
-    AddIncoming(Vec<T>),
-    AddOutgoing(Vec<T>),
+pub enum RegexMatchAction<T>
+where T : Hash + Eq {
+    AddIncoming(HashSet<T>),
+    AddOutgoing(HashSet<T>),
 }
 
 impl RegexMatchAction<String> {
-    fn to_ptr_list(&self, obj: &ObjectFile) -> RegexMatchAction<usize> {
+    fn to_idx_list(&self, graph: &Graph<String, ()>) -> RegexMatchAction<NodeIndex> {
+        let required_symbols = match &self {
+            RegexMatchAction::AddIncoming(l) 
+            | RegexMatchAction::AddOutgoing(l) => l
+        };
+        let matched = graph
+            .node_indices()
+            .filter(|&idx| required_symbols.contains(&graph[idx]))
+            .collect();
         match &self {
-            RegexMatchAction::AddIncoming(l) => RegexMatchAction::AddIncoming(
-                l.iter()
-                .filter_map(|f| obj.get_fun_id(f))
-                .collect()
-            ),
-            RegexMatchAction::AddOutgoing(l) => RegexMatchAction::AddIncoming(
-                l.iter()
-                    .filter_map(|f| obj.get_fun_id(f))
-                    .collect()
-            ),
+            RegexMatchAction::AddIncoming(_) => RegexMatchAction::AddIncoming(matched),
+            RegexMatchAction::AddOutgoing(_) => RegexMatchAction::AddOutgoing(matched),
         }
     }
 }
@@ -141,23 +133,23 @@ impl RegexNodePass {
     }
 }
 
-impl LinkerPass for RegexNodePass {
-    fn run_pass(&self, obj: &mut ObjectFile) {
-        let resolved_rules: Vec<(&Regex, RegexMatchAction<usize>)> = self.rules
+impl Pass for RegexNodePass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        let resolved_rules: Vec<(&Regex, RegexMatchAction<NodeIndex>)> = self.rules
             .iter()
-            .map(|(r, action)| (r, action.to_ptr_list(obj)))
+            .map(|(r, action)| (r, action.to_idx_list(graph)))
             .collect();
         let mut total_resolved: usize = 0;
 
-        for (idx, function) in obj.functions.iter().enumerate() {
+        for idx in graph.node_indices() {
             for (re, links) in &resolved_rules {
-                if !re.is_match(function.get_name()) {
+                if !re.is_match(&graph[idx]) {
                     continue;
                 }
                 // This function matched regex
-                let this_f_id = vec![idx];
-                let from_funcs: &Vec<usize>;
-                let to_funcs: &Vec<usize>;
+                let this_f_id = HashSet::from([idx]);
+                let from_funcs: &HashSet<NodeIndex>;
+                let to_funcs: &HashSet<NodeIndex>;
 
                 match links {
                     RegexMatchAction::AddIncoming(l) => {
@@ -173,17 +165,8 @@ impl LinkerPass for RegexNodePass {
                 for &src in from_funcs {
                     for &dst in to_funcs {
                         total_resolved += 1;
-                        debug!("Adding {} -> {}",
-                                obj.functions[src].get_name(),
-                                obj.functions[dst].get_name(),
-                            );
-                        obj.calls.push(
-                            FCall::new_with_callsite(
-                                SymPtr::F(dst),
-                                vec![],
-                                SymPtr::F(src), // callsite is last!
-                            )
-                        );
+                        debug!("Adding {} -> {}", graph[src], graph[dst]);
+                        graph.add_edge(src, dst, ());
                     }
                 }
             }
@@ -207,7 +190,7 @@ impl CutWidthPass {
     }
 }
 
-impl GraphPass for CutWidthPass {
+impl Pass for CutWidthPass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         // (deg-in; deg-out)
         let mut deg: Vec<(usize, usize)> = vec![(0, 0); graph.node_count()];
@@ -233,7 +216,7 @@ impl GraphPass for CutWidthPass {
 #[derive(Default)]
 pub struct UniqueEdgesPass {}
 
-impl GraphPass for UniqueEdgesPass {
+impl Pass for UniqueEdgesPass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         let mut added_nodes: HashSet<(usize, usize)> = HashSet::new();
         *graph = graph.filter_map(
