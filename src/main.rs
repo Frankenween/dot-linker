@@ -13,7 +13,7 @@ use log::{info, warn};
 use petgraph::Graph;
 use crate::linker::conversion::graphviz_to_graph;
 use crate::linker::graph_link;
-use crate::linker::pass::{CutWidthPass, UniqueEdgesPass};
+use crate::linker::pass::{CutWidthPass, SubgraphExtractionPass, UniqueEdgesPass};
 use crate::linker::pass::Pass;
 
 pub mod linker;
@@ -75,40 +75,10 @@ struct Args {
 }
 
 fn mark_reachable_functions(extract_list: PathBuf, objects: &mut [(PathBuf, DiGraph<String, ()>)]) -> io::Result<()> {
-    let tags = read_to_string(extract_list)?
-        .lines()
-        .map(|l| l.trim().to_string())
-        .collect::<HashSet<_>>();
+    let tags = read_to_string(extract_list)?;
+    let extractor = SubgraphExtractionPass::new_from_str(&tags);
     for (_, graph) in objects.iter_mut() {
-        let tagged_nodes = graph.node_weights()
-            .enumerate()
-            .filter_map(|(i, node)| {
-                if tags.contains(node) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut dfs_visitor = Dfs::empty(&*graph);
-        let mut visited = HashSet::new();
-        for v in tagged_nodes {
-            #[allow(clippy::cast_possible_truncation)]
-            dfs_visitor.move_to(NodeIndex::from(v as DefaultIx));
-            while let Some(reached) = dfs_visitor.next(&*graph) {
-                visited.insert(reached);
-            }
-        }
-        *graph = graph.filter_map(
-            |idx, value| {
-                if visited.contains(&idx) { 
-                    Some(value.clone()) 
-                } else { 
-                    None 
-                }
-            },
-            |_, ()| Some(())
-        );
+        extractor.run_pass(graph);
     }
     Ok(())
 }

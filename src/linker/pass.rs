@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 use log::{debug, info, error};
+use petgraph::adj::DefaultIx;
 use petgraph::Graph;
 use petgraph::graph::NodeIndex;
-use petgraph::prelude::EdgeRef;
+use petgraph::prelude::{Dfs, EdgeRef};
 use regex::Regex;
 
 pub trait Pass {
@@ -252,6 +253,64 @@ impl Pass for UniqueEdgesPass {
 
     fn name(&self) -> String {
         "decouple edges".to_string()
+    }
+}
+
+pub struct SubgraphExtractionPass {
+    tags: HashSet<String>,
+}
+
+impl SubgraphExtractionPass {
+    #[must_use]
+    pub fn new(tags: HashSet<String>) -> Self {
+        Self { tags }
+    }
+
+    #[must_use]
+    pub fn new_from_str(data: &str) -> Self {
+        Self {
+            tags: data.split_whitespace()
+                .map(ToString::to_string)
+                .collect(),
+        }
+    }
+}
+
+impl Pass for SubgraphExtractionPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        let tagged_nodes = graph.node_weights()
+            .enumerate()
+            .filter_map(|(i, node)| {
+                if self.tags.contains(node) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut dfs_visitor = Dfs::empty(&*graph);
+        let mut visited = HashSet::new();
+        for v in tagged_nodes {
+            #[allow(clippy::cast_possible_truncation)]
+            dfs_visitor.move_to(NodeIndex::from(v as DefaultIx));
+            while let Some(reached) = dfs_visitor.next(&*graph) {
+                visited.insert(reached);
+            }
+        }
+        *graph = graph.filter_map(
+            |idx, value| {
+                if visited.contains(&idx) {
+                    Some(value.clone())
+                } else {
+                    None
+                }
+            },
+            |_, ()| Some(())
+        );
+    }
+
+    fn name(&self) -> String {
+        "subgraph extraction".to_string()
     }
 }
 
