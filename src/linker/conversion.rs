@@ -25,6 +25,7 @@ fn ensure_node<'a, 'b>(
         );
 }
 
+#[must_use]
 pub fn graphviz_to_graph(value: &DotGraph) -> Graph<String, ()> {
     let dot_graph = match value {
         DotGraph::Graph { stmts, .. }

@@ -13,7 +13,7 @@ pub trait Pass {
     fn name(&self) -> String;
 }
 
-/// Make all listed functions terminal, after this pass there will be no calls from them.
+/// Make all listed functions terminal, after this pass there will be no such nodes.
 pub struct TerminateNodePass {
     terminate_funcs: HashSet<String>
 }
@@ -84,7 +84,7 @@ impl RegexNodePass {
     }
 
     #[must_use]
-    pub fn new_from_lines(data: &str) -> Self {
+    pub fn new_from_str(data: &str) -> Self {
         let mut result = Self::new();
         for line in data.lines() {
             result.add_rule_from_line(line);
@@ -186,12 +186,12 @@ impl Pass for RegexNodePass {
     }
 }
 
-pub struct CutWidthPass {
+pub struct CutDegPass {
     max_incoming: usize,
     max_outgoing: usize,
 }
 
-impl CutWidthPass {
+impl CutDegPass {
     #[must_use]
     pub fn new(max_incoming: Option<usize>, max_outgoing: Option<usize>) -> Self {
         Self {
@@ -201,7 +201,7 @@ impl CutWidthPass {
     }
 }
 
-impl Pass for CutWidthPass {
+impl Pass for CutDegPass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         // (deg-in; deg-out)
         let mut deg: Vec<(usize, usize)> = vec![(0, 0); graph.node_count()];
@@ -209,18 +209,10 @@ impl Pass for CutWidthPass {
             deg[edge.source().index()].1 += 1;
             deg[edge.target().index()].0 += 1;
         }
-        let keep_nodes = deg
-            .iter()
-            .enumerate()
-            .filter_map(|(v, &(deg_in, deg_out))|
-                if deg_in <= self.max_incoming && deg_out <= self.max_outgoing {
-                    Some(v)
-                } else {
-                    None
-                }
-            )
-            .collect::<HashSet<_>>();
-        graph.retain_nodes(|_, v| keep_nodes.contains(&v.index()));
+        graph.retain_nodes(
+            |_, v| deg[v.index()].0 <= self.max_incoming &&
+                deg[v.index()].1 <= self.max_outgoing,
+        );
     }
 
     fn name(&self) -> String {
@@ -311,6 +303,19 @@ impl Pass for SubgraphExtractionPass {
 
     fn name(&self) -> String {
         "subgraph extraction".to_string()
+    }
+}
+
+#[derive(Default)]
+pub struct ReverseGraphPass {}
+
+impl Pass for ReverseGraphPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        graph.reverse();
+    }
+
+    fn name(&self) -> String {
+        "reverse graph".to_string()
     }
 }
 
