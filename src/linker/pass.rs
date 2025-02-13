@@ -319,6 +319,61 @@ impl Pass for ReverseGraphPass {
     }
 }
 
+// Reparent all children of matching nodes
+// If we have v -> matched -> u, then an edge v -> u is added
+// All nodes are preserved
+pub struct ReparentGraphPass {
+    reparent_rules: Vec<Regex>
+}
+
+impl ReparentGraphPass {
+    #[must_use]
+    pub fn new_from_str(data: &str) -> Self {
+        Self {
+            reparent_rules: data.lines()
+                .flat_map(|l| {
+                    Regex::new(l).inspect_err(|e| error!("Wrong regex \"{}\": {}", l, e))
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Pass for ReparentGraphPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        let mut new_graph = graph.clone();
+        let mut matched_nodes = HashSet::new();
+        let mut reparanted = 0usize;
+        for node in graph.node_indices() {
+            if self.reparent_rules.iter()
+                .any(|rule| rule.is_match(&graph[node])) {
+                matched_nodes.insert(node);
+            }
+        }
+        for v in graph.node_indices() {
+            for next in graph
+                .neighbors(v)
+                .filter(|n| matched_nodes.contains(n)) {
+                // need to reparent all next children
+                debug!("Reparent {} children to {}", next.index(), v.index());
+                for child in graph.neighbors(next) {
+                    new_graph.add_edge(v, child, ());
+                    reparanted += 1;
+                }
+            }
+        }
+        info!(
+            "Reparent pass matched {} nodes and added {} new edges", 
+            matched_nodes.len(), reparanted
+        );
+        *graph = new_graph;
+    }
+
+    fn name(&self) -> String {
+        "reparent nodes".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +417,53 @@ mod tests {
             for j in 0..3 {
                 assert_eq!(adj_matrix[i][j], graph.edges_connecting(v[i], v[j]).count());
             }
+        }
+    }
+
+    #[test]
+    fn test_reparent() {
+        let mut graph: Graph<String, ()> = Graph::new();
+        let v = [
+            graph.add_node("0".to_string()),
+            graph.add_node("1".to_string()),
+            graph.add_node("reparent1".to_string()),
+            graph.add_node("reparent2".to_string()),
+            graph.add_node("4".to_string()),
+        ];
+        macro_rules! add_edge {
+            ($v : expr, $u : expr) => {
+                graph.add_edge(v[$v], v[$u], ())
+            };
+        }
+        add_edge!(0, 1);
+        add_edge!(0, 2);
+        add_edge!(0, 3);
+        add_edge!(2, 4);
+        add_edge!(3, 1);
+        add_edge!(3, 2);
+
+        let mut orig_graph = graph.clone();
+
+        let pass = ReparentGraphPass::new_from_str("reparent.*");
+        pass.run_pass(&mut graph);
+
+        // From reparent1
+        orig_graph.add_edge(v[0], v[4], ());
+        orig_graph.add_edge(v[3], v[4], ());
+        // From reparent2
+        orig_graph.add_edge(v[0], v[1], ());
+        orig_graph.add_edge(v[0], v[2], ());
+
+        for node in v {
+            let mut n1 = orig_graph.edges(node)
+                .map(|e| (e.source(), e.target()))
+                .collect::<Vec<_>>();
+            let mut n2 = graph.edges(node)
+                .map(|e| (e.source(), e.target()))
+                .collect::<Vec<_>>();
+            n1.sort();
+            n2.sort();
+            assert_eq!(n1, n2);
         }
     }
 }
