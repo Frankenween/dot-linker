@@ -15,16 +15,16 @@ pub trait Pass {
 
 /// Make all listed functions terminal, after this pass there will be no such nodes.
 pub struct TerminateNodePass {
-    terminate_funcs: HashSet<String>
+    terminate_funcs: Vec<Regex>
 }
 
 impl TerminateNodePass {
     pub fn new(iter: &mut dyn Iterator<Item = &str>) -> Self {
         Self {
-            terminate_funcs: iter.map(String::from).collect()
+            terminate_funcs: iter.map(|s| Regex::new(s).unwrap()).collect()
         }
     }
-    
+
     #[must_use]
     pub fn new_from_str(s: &str) -> Self {
         Self::new(&mut s.split_whitespace())
@@ -34,11 +34,13 @@ impl TerminateNodePass {
 impl Pass for TerminateNodePass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         *graph = graph.filter_map(
-            |_, name| if self.terminate_funcs.contains(name) {
-                Some(name.clone())
-            } else {
+            |_, name| if self.terminate_funcs
+                .iter()
+                .any(|re| re.is_match(name).unwrap()) {
                 debug!("Terminating node {name}");
                 None
+            } else {
+                Some(name.clone())
             },
             |_, ()| Some(())
         );
@@ -388,20 +390,20 @@ impl RemoveEdgesPass {
         }
         result
     }
-    
+
     pub fn add_rule_from_str(&mut self, rule: &str) {
         let (l, r) = rule.split_once(' ').unwrap();
         self.rules.push(
             Regex::new(&Self::get_edge_string(l, r)).unwrap()
         );
     }
-    
+
     fn edge_matches(&self, from_label: &str, to_label: &str) -> bool {
         self.rules.iter().any(|re| {
             re.is_match(&Self::get_edge_string(from_label, to_label)).unwrap()
         })
     }
-    
+
     fn get_edge_string(from_label: &str, to_label: &str) -> String {
         from_label.to_string() + "\0" + to_label
     }
@@ -430,6 +432,23 @@ impl Pass for RemoveEdgesPass {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_remove_nodes() {
+        let mut graph: Graph<String, ()> = Graph::new();
+        graph.add_node("aba".to_string());
+        graph.add_node("abc".to_string());
+        graph.add_node("123".to_string());
+        graph.add_node("xy1".to_string());
+
+        let pass = TerminateNodePass::new_from_str("^\\d+$ (\\w).\\1");
+        pass.run_pass(&mut graph);
+
+        assert_eq!(
+            graph.node_weights().collect::<HashSet<_>>(),
+            ["abc".to_string(), "xy1".to_string()].iter().collect::<HashSet<_>>()
+        );
+    }
 
     #[test]
     fn test_unique_edges() {
@@ -519,7 +538,7 @@ mod tests {
             assert_eq!(n1, n2);
         }
     }
-    
+
     #[test]
     fn test_remove_edges() {
         let mut graph = Graph::new();
@@ -537,9 +556,9 @@ mod tests {
         pass.add_rule_from_str("a_(.*) b.*");
         pass.add_rule_from_str(r"a_(.*) a_(?!\1)");
         pass.add_rule_from_str("^a.* [a-x]$");
-        
+
         pass.run_pass(&mut graph);
-        
+
         // need a_1 -> a_1, a_1 -> x
         assert_eq!(
             graph.neighbors(v[0]).map(|e| graph[e].as_ref()).collect::<HashSet<_>>(),
