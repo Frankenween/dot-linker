@@ -5,7 +5,7 @@ use petgraph::adj::DefaultIx;
 use petgraph::Graph;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::{Dfs, EdgeRef};
-use regex::Regex;
+use fancy_regex::Regex;
 
 pub trait Pass {
     fn run_pass(&self, graph: &mut Graph<String, ()>);
@@ -73,11 +73,11 @@ impl RegexMatchAction<String> {
 }
 
 #[derive(Default)]
-pub struct RegexNodePass {
+pub struct RegexEdgeGenPass {
     rules: Vec<(Regex, RegexMatchAction<String>)>
 }
 
-impl RegexNodePass {
+impl RegexEdgeGenPass {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -140,7 +140,7 @@ impl RegexNodePass {
     }
 }
 
-impl Pass for RegexNodePass {
+impl Pass for RegexEdgeGenPass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         let resolved_rules: Vec<(&Regex, RegexMatchAction<NodeIndex>)> = self.rules
             .iter()
@@ -150,7 +150,7 @@ impl Pass for RegexNodePass {
 
         for idx in graph.node_indices() {
             for (re, links) in &resolved_rules {
-                if !re.is_match(&graph[idx]) {
+                if !re.is_match(&graph[idx]).unwrap() {
                     continue;
                 }
                 // This function matched regex
@@ -346,7 +346,7 @@ impl Pass for ReparentGraphPass {
         let mut reparanted = 0usize;
         for node in graph.node_indices() {
             if self.reparent_rules.iter()
-                .any(|rule| rule.is_match(&graph[node])) {
+                .any(|rule| rule.is_match(&graph[node]).unwrap()) {
                 matched_nodes.insert(node);
             }
         }
@@ -371,6 +371,59 @@ impl Pass for ReparentGraphPass {
 
     fn name(&self) -> String {
         "reparent nodes".to_string()
+    }
+}
+
+#[derive(Default)]
+pub struct RemoveEdgesPass {
+    /// List of regular expressions in format (from_re\0to_re)
+    rules: Vec<Regex>,
+}
+
+impl RemoveEdgesPass {
+    pub fn new_from_str(data: &str) -> Self {
+        let mut result = RemoveEdgesPass { rules: Vec::new() };
+        for line in data.lines() {
+            result.add_rule_from_str(line);
+        }
+        result
+    }
+    
+    pub fn add_rule_from_str(&mut self, rule: &str) {
+        let (l, r) = rule.split_once(' ').unwrap();
+        self.rules.push(
+            Regex::new(&Self::get_edge_string(l, r)).unwrap()
+        );
+    }
+    
+    fn edge_matches(&self, from_label: &str, to_label: &str) -> bool {
+        self.rules.iter().any(|re| {
+            re.is_match(&Self::get_edge_string(from_label, to_label)).unwrap()
+        })
+    }
+    
+    fn get_edge_string(from_label: &str, to_label: &str) -> String {
+        from_label.to_string() + "\0" + to_label
+    }
+}
+
+impl Pass for RemoveEdgesPass {
+    fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        *graph = graph.filter_map(
+            |_, name| Some(name.clone()),
+            |e_idx, ()| {
+                let (from, to) = graph.edge_endpoints(e_idx)?;
+                if self.edge_matches(graph[from].as_ref(), graph[to].as_ref()) {
+                    None
+                } else {
+                    Some(())
+                }
+            }
+        );
+    }
+
+    fn name(&self) -> String {
+        "remove edges".to_string()
     }
 }
 
@@ -465,5 +518,32 @@ mod tests {
             n2.sort();
             assert_eq!(n1, n2);
         }
+    }
+    
+    #[test]
+    fn test_remove_edges() {
+        let mut graph = Graph::new();
+        let v = [
+            graph.add_node("a_1".to_string()),
+            graph.add_node("a_2".to_string()),
+            graph.add_node("b_2".to_string()),
+            graph.add_node("x".to_string()),
+            graph.add_node("y".to_string()),
+        ];
+        for &i in &v {
+            graph.add_edge(v[0], i, ());
+        }
+        let mut pass = RemoveEdgesPass::default();
+        pass.add_rule_from_str("a_(.*) b.*");
+        pass.add_rule_from_str(r"a_(.*) a_(?!\1)");
+        pass.add_rule_from_str("^a.* [a-x]$");
+        
+        pass.run_pass(&mut graph);
+        
+        // need a_1 -> a_1, a_1 -> x
+        assert_eq!(
+            graph.neighbors(v[0]).map(|e| graph[e].as_ref()).collect::<HashSet<_>>(),
+            HashSet::from(["a_1", "y"])
+        );
     }
 }
