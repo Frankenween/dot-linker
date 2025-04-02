@@ -357,7 +357,7 @@ impl Pass for ReparentGraphPass {
                 .neighbors(v)
                 .filter(|n| matched_nodes.contains(n)) {
                 // need to reparent all next children
-                debug!("Reparent {} children to {}", next.index(), v.index());
+                debug!("Reparent {} children to {}", graph[next], graph[v]);
                 for child in graph.neighbors(next) {
                     new_graph.add_edge(v, child, ());
                     reparanted += 1;
@@ -416,6 +416,7 @@ impl Pass for RemoveEdgesPass {
             |e_idx, ()| {
                 let (from, to) = graph.edge_endpoints(e_idx)?;
                 if self.edge_matches(graph[from].as_ref(), graph[to].as_ref()) {
+                    debug!("Terminating edge {} -> {}", graph[from], graph[to]);
                     None
                 } else {
                     Some(())
