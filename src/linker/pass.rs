@@ -14,11 +14,11 @@ pub trait Pass {
 }
 
 /// Make all listed functions terminal, after this pass there will be no such nodes.
-pub struct TerminateNodePass {
+pub struct RemoveNodePass {
     terminate_funcs: Vec<Regex>
 }
 
-impl TerminateNodePass {
+impl RemoveNodePass {
     pub fn new(iter: &mut dyn Iterator<Item = &str>) -> Self {
         Self {
             terminate_funcs: iter.map(|s| Regex::new(s).unwrap()).collect()
@@ -31,7 +31,7 @@ impl TerminateNodePass {
     }
 }
 
-impl Pass for TerminateNodePass {
+impl Pass for RemoveNodePass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
         *graph = graph.filter_map(
             |_, name| if self.terminate_funcs
@@ -441,7 +441,7 @@ mod tests {
         graph.add_node("123".to_string());
         graph.add_node("xy1".to_string());
 
-        let pass = TerminateNodePass::new_from_str("^\\d+$ (\\w).\\1");
+        let pass = RemoveNodePass::new_from_str("^\\d+$ (\\w).\\1");
         pass.run_pass(&mut graph);
 
         assert_eq!(

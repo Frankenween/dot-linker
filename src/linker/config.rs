@@ -1,7 +1,10 @@
 use std::{fs, io};
 use std::path::PathBuf;
 use log::error;
-use crate::linker::pass::{CutDegPass, Pass, RegexEdgeGenPass, RemoveEdgesPass, ReparentGraphPass, ReverseGraphPass, SubgraphExtractionPass, TerminateNodePass, UniqueEdgesPass};
+use crate::linker::pass::{
+    CutDegPass, Pass, RegexEdgeGenPass, RemoveEdgesPass, 
+    ReparentGraphPass, ReverseGraphPass, SubgraphExtractionPass, RemoveNodePass, 
+    UniqueEdgesPass};
 
 fn parse_line(config_line: &str, line_number: usize) -> io::Result<Box<dyn Pass>> {
     let line = config_line
@@ -9,11 +12,17 @@ fn parse_line(config_line: &str, line_number: usize) -> io::Result<Box<dyn Pass>
         .collect::<Vec<&str>>();
     let pass = line[0];
     match pass {
-        "term_nodes" => {
+        "remove_nodes" => {
             let data = fs::read_to_string(
                 line.get(1).ok_or(io::ErrorKind::UnexpectedEof)?
             )?;
-            Ok(Box::new(TerminateNodePass::new_from_str(&data)))
+            Ok(Box::new(RemoveNodePass::new_from_str(&data)))
+        },
+        "remove_edges" => {
+            let data = fs::read_to_string(
+                line.get(1).ok_or(io::ErrorKind::UnexpectedEof)?
+            )?;
+            Ok(Box::new(RemoveEdgesPass::new_from_str(&data)))
         },
         "regex_edge_gen" => {
             let data = fs::read_to_string(
@@ -65,12 +74,6 @@ fn parse_line(config_line: &str, line_number: usize) -> io::Result<Box<dyn Pass>
                 line.get(1).ok_or(io::ErrorKind::UnexpectedEof)?
             )?;
             Ok(Box::new(ReparentGraphPass::new_from_str(&data)))
-        },
-        "remove_edges" => {
-            let data = fs::read_to_string(
-                line.get(1).ok_or(io::ErrorKind::UnexpectedEof)?
-            )?;
-            Ok(Box::new(RemoveEdgesPass::new_from_str(&data)))
         },
         _ => {
             error!("Invalid config on line {line_number}: no \"{pass}\" pass");

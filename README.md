@@ -19,7 +19,11 @@ Config is a file with the list of modifications(passes) to be applied to the gra
 _Note: if `link` is provided, all graphs are linked before any modifications_
 
 Currently supported operations:
-- `term_nodes file` - remove all nodes with names listed in `file`
+- `remove_nodes file` - remove all nodes with names matching regexps listed in `file`
+- `remove_edges file` - remove all edges matching regex. Every rule has format `src_regex dst_regex`.
+  - Note 1: backreferences are supported between node patterns.
+  - Note 2: if no anchors provided, source name prefix and dst name suffix might be ignored.
+    Use anchors to force full matching(see tests)
 - `regex_edge_gen file` - create edges by provided rules
   - `"regex" -> name`: create nodes from every matching node to v
   - `"regex" <- name`: create nodes from v to every matching node
