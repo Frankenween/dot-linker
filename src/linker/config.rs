@@ -83,12 +83,22 @@ fn parse_line(config_line: &str, line_number: usize) -> io::Result<Box<dyn Pass>
 }
 
 pub fn parse_config_file(config_file: &PathBuf) 
-    -> io::Result<Vec<Box<dyn Pass>>> {
+    -> io::Result<(Vec<Box<dyn Pass>>, bool, Vec<Box<dyn Pass>>)> {
     let config_file_contents = fs::read_to_string(config_file)?;
-    let mut passes: Vec<Box<dyn Pass>> = vec![];
+    let mut linked = false;
+    let mut before_link: Vec<Box<dyn Pass>> = vec![];
+    let mut after_link: Vec<Box<dyn Pass>> = vec![];
     
     for (line_number, line) in config_file_contents.lines().enumerate() {
-        passes.push(parse_line(line, line_number)?);
+        if line == "link" {
+            linked = true;
+            continue;
+        }
+        if linked {
+            after_link.push(parse_line(line, line_number)?);
+        } else {
+            before_link.push(parse_line(line, line_number)?);
+        }
     }
-    Ok(passes)
+    Ok((before_link, linked, after_link))
 }

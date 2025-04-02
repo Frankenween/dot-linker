@@ -411,18 +411,21 @@ impl RemoveEdgesPass {
 
 impl Pass for RemoveEdgesPass {
     fn run_pass(&self, graph: &mut Graph<String, ()>) {
+        let mut edges_removed = 0u32;
         *graph = graph.filter_map(
             |_, name| Some(name.clone()),
             |e_idx, ()| {
                 let (from, to) = graph.edge_endpoints(e_idx)?;
                 if self.edge_matches(graph[from].as_ref(), graph[to].as_ref()) {
                     debug!("Terminating edge {} -> {}", graph[from], graph[to]);
+                    edges_removed += 1;
                     None
                 } else {
                     Some(())
                 }
             }
         );
+        debug!("Removed {edges_removed} edges");
     }
 
     fn name(&self) -> String {

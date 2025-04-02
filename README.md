@@ -11,14 +11,12 @@ Config is written in file `config`
 
 To store result in a specific file, output file should be passed as `-s` argument
 
-To link all graphs into one, use `-l` or `--link` argument
-
 # Config
 Config is a file with the list of modifications(passes) to be applied to the graph.
 
-_Note: if `link` is provided, all graphs are linked before any modifications_
 
 Currently supported operations:
+- `link` - link all graphs in one
 - `remove_nodes file` - remove all nodes with names matching regexps listed in `file`
 - `remove_edges file` - remove all edges matching regex. Every rule has format `src_regex dst_regex`.
   - Note 1: backreferences are supported between node patterns.

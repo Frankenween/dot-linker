@@ -5,7 +5,7 @@ use std::fs::{read_to_string, File};
 use std::path::PathBuf;
 use std::{fs, io};
 use std::io::{BufRead, BufReader};
-use log::{info, warn};
+use log::{debug, info, warn};
 use petgraph::Graph;
 use inv_call_extract::linker::config::parse_config_file;
 use crate::linker::conversion::graphviz_to_graph;
@@ -31,19 +31,28 @@ struct Args {
     /// Default value is "out.dot"
     #[clap(short, long, default_value = "out.dot")]
     save_extracted: PathBuf,
-    
-    /// Link all files in one object file
-    #[clap(short, long)]
-    link: bool,
 }
 
-fn run_passes(args: &Args, objects: &mut [(PathBuf, Graph<String, ()>)]) -> io::Result<()> {
-    let passes = parse_config_file(&args.config)?;
-    for pass in passes {
-        info!("Running pass {}", pass.name());
+fn run_passes(args: &Args, objects: &mut Vec<(PathBuf, Graph<String, ()>)>) -> io::Result<()> {
+    let (before_link, should_link, after_link) = parse_config_file(&args.config)?;
+    for pass in before_link {
+        info!("Running pass before link: {}", pass.name());
         objects.iter_mut()
             .for_each(|(_, graph)| pass.run_pass(graph));
     }
+    if should_link {
+        let linked = link_all_graphs(
+            &objects.iter().map(|p| p.1.clone()).collect::<Vec<_>>()
+        );
+        *objects = vec![(args.save_extracted.clone(), linked)];
+        info!("Linked graphs");
+    }
+    for pass in after_link {
+        info!("Running pass after link: {}", pass.name());
+        objects.iter_mut()
+            .for_each(|(_, graph)| pass.run_pass(graph));
+    }
+
     Ok(())
 }
 
@@ -64,7 +73,7 @@ fn read_dot_graphs(args: &Args) -> io::Result<Vec<(PathBuf, Graph<String, ()>)>>
         }
     };
     for dot in &files {
-        info!("reading {dot}");
+        debug!("reading {dot}");
         let path = PathBuf::from(dot);
         let Ok(graph) = parse(&read_to_string(path.clone())?) else {
             panic!("Failed to parse .dot graph: {dot:?}");
@@ -85,13 +94,6 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
     // Keep objects with names to save them later if needed.
     let mut graphs = read_dot_graphs(&args)?;
-    // Link if needed
-    if args.link {
-        let linked = link_all_graphs(
-            &graphs.iter().map(|p| p.1.clone()).collect::<Vec<_>>()
-        );
-        graphs = vec![(args.save_extracted.clone(), linked)];
-    }
 
     // Run deg pass on extracted subgraph
     run_passes(&args, &mut graphs)?;
